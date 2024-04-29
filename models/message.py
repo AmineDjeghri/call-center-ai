@@ -70,7 +70,7 @@ class ToolModel(BaseModel):
         )
 
     @field_validator("function_name")
-    def validate_function_name(cls, function_name: str) -> str:
+    def _validate_function_name(cls, function_name: str) -> str:
         if function_name not in ToolModel._available_function_names():
             raise ValueError(
                 f'Invalid function names "{function_name}", available are {ToolModel._available_function_names()}'
@@ -101,8 +101,8 @@ class ToolModel(BaseModel):
             return_objects=True,
         )  # type: ignore
 
-        if not args:
-            logger.warn(
+        if args == None:
+            logger.warning(
                 f"Error decoding JSON args for function {name}: {self.function_arguments[:20]}...{self.function_arguments[-20:]}"
             )
             self.content = f"Bad arguments, available are {ToolModel._available_function_names()}. Please try again."
@@ -119,11 +119,17 @@ class ToolModel(BaseModel):
                 res = await getattr(plugins, name)(**args)
                 res_log = f"{res[:20]}...{res[-20:]}"
                 logger.info(f"Executing function {name} ({args}): {res_log}")
+            except TypeError as e:
+                logger.warning(
+                    f"Wrong arguments for function {name}: {args}. Error: {e}"
+                )
+                res = f"Wrong arguments, please fix them and try again."
+                res_log = res
             except Exception as e:
-                logger.warn(
+                logger.warning(
                     f"Error executing function {self.function_name} with args {args}: {e}"
                 )
-                res = f"Error: {e}. Please try again."
+                res = f"Error: {e}."
                 res_log = res
             span.set_attribute("result", res_log)
             self.content = res
@@ -146,7 +152,7 @@ class MessageModel(BaseModel):
     tool_calls: list[ToolModel] = []
 
     @field_validator("created_at")
-    def validate_created_at(cls, created_at: datetime) -> datetime:
+    def _validate_created_at(cls, created_at: datetime) -> datetime:
         """
         Ensure the created_at field is timezone-aware.
 

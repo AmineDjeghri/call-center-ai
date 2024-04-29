@@ -4,7 +4,7 @@ from fastapi.encoders import jsonable_encoder
 from helpers.config import CONFIG
 from helpers.config_models.database import SqliteModel
 from helpers.logging import build_logger
-from models.call import CallModel
+from models.call import CallStateModel
 from models.readiness import ReadinessStatus
 from opentelemetry.instrumentation.sqlite3 import SQLite3Instrumentor
 from persistence.istore import IStore
@@ -44,7 +44,7 @@ class SqliteStore(IStore):
             _logger.error(f"Error requesting SQLite, {e}")
         return ReadinessStatus.FAIL
 
-    async def call_aget(self, call_id: UUID) -> Optional[CallModel]:
+    async def call_aget(self, call_id: UUID) -> Optional[CallStateModel]:
         _logger.debug(f"Loading call {call_id}")
         call = None
         async with self._use_db() as db:
@@ -55,12 +55,12 @@ class SqliteStore(IStore):
             row = await cursor.fetchone()
             if row:
                 try:
-                    call = CallModel.model_validate_json(row[0])
+                    call = CallStateModel.model_validate_json(row[0])
                 except ValidationError as e:
                     _logger.warning(f"Error parsing call: {e.errors()}")
         return call
 
-    async def call_aset(self, call: CallModel) -> bool:
+    async def call_aset(self, call: CallStateModel) -> bool:
         # TODO: Catch exceptions and return False if something goes wrong
         data = jsonable_encoder(call.model_dump(), exclude_none=True)
         _logger.debug(f"Saving call {call.call_id}: {data}")
@@ -75,34 +75,36 @@ class SqliteStore(IStore):
             await db.commit()
         return True
 
-    async def call_asearch_one(self, phone_number: str) -> Optional[CallModel]:
+    async def call_asearch_one(self, phone_number: str) -> Optional[CallStateModel]:
         _logger.debug(f"Loading last call for {phone_number}")
         call = None
         async with self._use_db() as db:
             cursor = await db.execute(
-                f"SELECT data FROM {self._config.table} WHERE (JSON_EXTRACT(data, '$.phone_number') LIKE ? OR JSON_EXTRACT(data, '$.claim.policyholder_phone') LIKE ?) AND DATETIME(JSON_EXTRACT(data, '$.created_at')) >= DATETIME('now', '-{CONFIG.workflow.conversation_timeout_hour} hours') ORDER BY DATETIME(JSON_EXTRACT(data, '$.created_at')) DESC LIMIT 1",
+                f"SELECT data FROM {self._config.table} WHERE (JSON_EXTRACT(data, '$.initiate.phone_number') LIKE ? OR JSON_EXTRACT(data, '$.crm_entry.caller_phone') LIKE ?) AND DATETIME(JSON_EXTRACT(data, '$.created_at')) >= DATETIME('now', '-{CONFIG.workflow.conversation_timeout_hour} hours') ORDER BY DATETIME(JSON_EXTRACT(data, '$.created_at')) DESC LIMIT 1",
                 (
                     phone_number,  # data.phone_number
-                    phone_number,  # data.claim.policyholder_phone
+                    phone_number,  # data.crm_entry.caller_phone
                 ),
             )
             row = await cursor.fetchone()
             if row:
                 try:
-                    call = CallModel.model_validate_json(row[0])
+                    call = CallStateModel.model_validate_json(row[0])
                 except ValidationError as e:
                     _logger.warning(f"Error parsing call: {e.errors()}")
         return call
 
-    async def call_asearch_all(self, phone_number: str) -> Optional[list[CallModel]]:
+    async def call_asearch_all(
+        self, phone_number: str
+    ) -> Optional[list[CallStateModel]]:
         _logger.debug(f"Loading all {self._config.table} for {phone_number}")
         calls = []
         async with self._use_db() as db:
             cursor = await db.execute(
-                f"SELECT data FROM {self._config.table} WHERE JSON_EXTRACT(data, '$.phone_number') LIKE ? OR JSON_EXTRACT(data, '$.claim.policyholder_phone') LIKE ? ORDER BY DATETIME(JSON_EXTRACT(data, '$.created_at')) DESC",
+                f"SELECT data FROM {self._config.table} WHERE JSON_EXTRACT(data, '$.initiate.phone_number') LIKE ? OR JSON_EXTRACT(data, '$.crm_entry.caller_phone') LIKE ? ORDER BY DATETIME(JSON_EXTRACT(data, '$.created_at')) DESC",
                 (
                     phone_number,  # data.phone_number
-                    phone_number,  # data.claim.policyholder_phone
+                    phone_number,  # data.crm_entry.caller_phone
                 ),
             )
             rows = await cursor.fetchall()
@@ -110,7 +112,7 @@ class SqliteStore(IStore):
                 if not row:
                     continue
                 try:
-                    calls.append(CallModel.model_validate_json(row[0]))
+                    calls.append(CallStateModel.model_validate_json(row[0]))
                 except ValidationError as e:
                     _logger.warning(f"Error parsing call: {e.errors()}")
         return calls or None
@@ -130,13 +132,13 @@ class SqliteStore(IStore):
         )
         # Create indexes
         await db.execute(
-            f"CREATE INDEX IF NOT EXISTS {self._config.table}_data_phone_number ON {self._config.table} (JSON_EXTRACT(data, '$.phone_number'))"
+            f"CREATE INDEX IF NOT EXISTS {self._config.table}_initiate_phone_number ON {self._config.table} (JSON_EXTRACT(data, '$.initiate.phone_number'))"
         )
         await db.execute(
-            f"CREATE INDEX IF NOT EXISTS {self._config.table}_data_created_at ON {self._config.table} (DATETIME(JSON_EXTRACT(data, '$.created_at')))"
+            f"CREATE INDEX IF NOT EXISTS {self._config.table}_created_at ON {self._config.table} (DATETIME(JSON_EXTRACT(data, '$.created_at')))"
         )
         await db.execute(
-            f"CREATE INDEX IF NOT EXISTS {self._config.table}_data_claim_policyholder_phone ON {self._config.table} (JSON_EXTRACT(data, '$.claim.policyholder_phone'))"
+            f"CREATE INDEX IF NOT EXISTS {self._config.table}_crm_entry_caller_phone ON {self._config.table} (JSON_EXTRACT(data, '$.crm_entry.caller_phone'))"
         )
 
         # Write changes to disk

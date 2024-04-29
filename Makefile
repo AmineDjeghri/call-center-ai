@@ -1,21 +1,21 @@
 # Container configuration
-container_name := ghcr.io/clemlesne/claim-ai-phone-bot
+container_name := ghcr.io/clemlesne/call-center-ai
 docker := docker
 # Versioning
 version_full ?= $(shell $(MAKE) --silent version-full)
 version_small ?= $(shell $(MAKE) --silent version)
 # DevTunnel configuration
-tunnel_name := claim-ai-$(shell hostname | sed 's/[^a-zA-Z0-9]//g' | tr '[:upper:]' '[:lower:]')
+tunnel_name := call-center-ai-$(shell hostname | sed 's/[^a-zA-Z0-9]//g' | tr '[:upper:]' '[:lower:]')
 tunnel_url ?= $(shell res=$$(devtunnel show $(tunnel_name) | grep -o 'http[s]*://[^"]*' | xargs) && echo $${res%/})
 # App location
 app_location := westeurope
 openai_location := southcentralus
 search_location := northeurope
 # App configuration
-agent_phone_number ?= $(shell cat config.yaml | yq '.workflow.agent_phone_number')
+transfer_phone_number ?= $(shell cat config.yaml | yq '.workflow.transfer_phone_number')
 bot_company ?= $(shell cat config.yaml | yq '.workflow.bot_company')
 bot_name ?= $(shell cat config.yaml | yq '.workflow.bot_name')
-bot_phone_number ?= $(shell cat config.yaml | yq '.communication_service.phone_number')
+bot_phone_number ?= $(shell cat config.yaml | yq '.communication_services.phone_number')
 event_subscription_name ?= $(shell echo '$(name)-$(bot_phone_number)' | tr -dc '[:alnum:]-')
 # Bicep outputs
 app_url ?= $(shell az deployment sub show --name $(name) | yq '.properties.outputs["appUrl"].value')
@@ -65,7 +65,7 @@ test:
 	@echo "➡️ Running deptry..."
 	python3 -m deptry \
 		--ignore-notebooks \
-		--per-rule-ignores "DEP002=aiohttp|gunicorn" \
+		--per-rule-ignores "DEP002=aiohttp|gunicorn|uvicorn" \
 		.
 
 	@echo "➡️ Running Pytest..."
@@ -85,7 +85,7 @@ lint:
 
 tunnel:
 	@echo "➡️ Creating tunnel..."
-	devtunnel show $(tunnel_name) || devtunnel create $(tunnel_name) --allow-anonymous --expiration 1d
+	devtunnel show $(tunnel_name) || devtunnel create $(tunnel_name) --allow-anonymous --expiration 7d
 
 	@echo "➡️ Creating port forwarding..."
 	devtunnel port show $(tunnel_name) --port-number 8080 || devtunnel port create $(tunnel_name) --port-number 8080
@@ -95,12 +95,14 @@ tunnel:
 
 dev:
 	VERSION=$(version_full) API__EVENTS_DOMAIN=$(tunnel_url) python3 -m gunicorn main:api \
-		--bind 0.0.0.0:8080 \
+		--bind 127.0.0.1:8080 \
 		--proxy-protocol \
 		--reload \
 		--reload-extra-file .env \
 		--reload-extra-file config.yaml \
-		--worker-class uvicorn.workers.UvicornWorker
+		--timeout 120 \
+		--worker-class uvicorn.workers.UvicornWorker \
+		--workers 2
 
 build:
 	$(docker) build \
@@ -116,21 +118,21 @@ start:
 		--env VERSION=$(version_full) \
 		--mount type=bind,source="$(CURDIR)/.env",target="/app/.env" \
 		--mount type=bind,source="$(CURDIR)/config.yaml",target="/app/config.yaml" \
-		--name claim-ai \
+		--name call-center-ai \
 		--publish 8080:8080 \
 		--rm \
 		$(container_name):$(version_small)
 
 stop:
 	@echo "Stopping container..."
-	$(docker) stop claim-ai
+	$(docker) stop call-center-ai
 
 deploy:
 	@echo "🛠️ Deploying to Azure..."
 	az deployment sub create \
 		--location $(app_location) \
 		--parameters \
-			'agentPhoneNumber=$(agent_phone_number)' \
+			'agentPhoneNumber=$(transfer_phone_number)' \
 			'botCompany=$(bot_company)' \
 			'botName=$(bot_name)' \
 			'botPhoneNumber=$(bot_phone_number)' \
@@ -150,7 +152,7 @@ post-deploy:
 		name=$(name) \
 		source=$(communication_id)
 
-	@echo "🚀 Claim AI is running on $(app_url)"
+	@echo "🚀 Call Center AI is running on $(app_url)"
 	$(MAKE) logs name=$(name)
 
 destroy:
@@ -167,7 +169,7 @@ logs:
 	az containerapp logs show \
 		--follow \
 		--format text \
-		--name claim-ai \
+		--name call-center-ai \
 		--resource-group $(name) \
 		--tail 100
 
@@ -186,7 +188,7 @@ eventgrid-register:
 	az eventgrid event-subscription create \
 		--advanced-filter data.to.PhoneNumber.Value StringBeginsWith $(bot_phone_number) \
 		--enable-advanced-filtering-on-arrays true \
-		--endpoint $(endpoint)/call/inbound \
+		--endpoint $(endpoint)/call/eventgrid \
 		--event-delivery-schema eventgridschema \
 		--event-ttl 3 \
 		--included-event-types Microsoft.Communication.IncomingCall \
@@ -208,6 +210,6 @@ watch-call:
 	@echo "👀 Watching status of $(phone_number)..."
 	while true; do \
 		clear; \
-		curl -s "$(endpoint)/call?phone_number=%2B$(phone_number)" | yq --prettyPrint '.[0] | {"phone_number": .phone_number, "claim": .claim, "reminders": .reminders}'; \
+		curl -s "$(endpoint)/call?phone_number=%2B$(phone_number)" | yq --prettyPrint '.[0] | {"phone_number": .phone_number, "crm_entry": .crm_entry, "reminders": .reminders}'; \
 		sleep 3; \
 	done

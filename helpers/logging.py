@@ -23,7 +23,7 @@ basicConfig(level=_LOGGING_SYS_LEVEL)
 # Creates a tracer from the global tracer provider
 TRACER = trace.get_tracer(
     instrumenting_library_version=CONFIG.version,
-    instrumenting_module_name="com.github.clemlesne.claim-ai",
+    instrumenting_module_name="com.github.clemlesne.call-center-ai",
 )
 
 

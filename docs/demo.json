@@ -11,8 +11,8 @@
     "medical_records": null,
     "police_report_number": null,
     "policy_number": "B01371946",
-    "policyholder_phone": "[number masked for the demo]",
-    "policyholder_name": "Clémence Lesne",
+    "caller_phone": "[number masked for the demo]",
+    "caller_name": "Clémence Lesne",
     "pre_existing_damage_description": null,
     "property_damage_description": null,
     "repair_replacement_estimates": null,
@@ -109,8 +109,8 @@
       "persona": "assistant",
       "tool_calls": [
         {
-          "content": "Updated claim field \"policyholder_name\" with value \"Clémence Lesne\".",
-          "function_arguments": "{\"field\":\"policyholder_name\",\"value\":\"Cl\\u00e9mence Lesne\",\"customer_response\":\"Je mets \\u00e0 jour le nom du titulaire de la police d'assurance \\u00e0 Cl\\u00e9mence Lesne.\"}",
+          "content": "Updated claim field \"caller_name\" with value \"Clémence Lesne\".",
+          "function_arguments": "{\"field\":\"caller_name\",\"value\":\"Cl\\u00e9mence Lesne\",\"customer_response\":\"Je mets \\u00e0 jour le nom du titulaire de la police d'assurance \\u00e0 Cl\\u00e9mence Lesne.\"}",
           "function_name": "updated_claim",
           "id": "call_GyDFaAQqpG5DEQwswuNRY2Ys"
         }
@@ -134,8 +134,8 @@
       "persona": "assistant",
       "tool_calls": [
         {
-          "content": "Updated claim field \"policyholder_phone\" with value \"[number masked for the demo]\".",
-          "function_arguments": "{\"field\":\"policyholder_phone\",\"value\":\"[number masked for the demo]\",\"customer_response\":\"Je confirme que votre num\\u00e9ro de t\\u00e9l\\u00e9phone est celui qui s'affiche \\u00e0 l'\\u00e9cran, [number masked for the demo], et je vais l'ajouter \\u00e0 votre dossier.\"}",
+          "content": "Updated claim field \"caller_phone\" with value \"[number masked for the demo]\".",
+          "function_arguments": "{\"field\":\"caller_phone\",\"value\":\"[number masked for the demo]\",\"customer_response\":\"Je confirme que votre num\\u00e9ro de t\\u00e9l\\u00e9phone est celui qui s'affiche \\u00e0 l'\\u00e9cran, [number masked for the demo], et je vais l'ajouter \\u00e0 votre dossier.\"}",
           "function_name": "updated_claim",
           "id": "call_1OOvuR291YXDqfuYV89e3sxD"
         }

@@ -18,7 +18,7 @@ param searchLocation string
 param tags object
 
 var prefix = deployment().name
-var appUrl = 'https://claim-ai.${acaEnv.properties.defaultDomain}'
+var appUrl = 'https://call-center-ai.${acaEnv.properties.defaultDomain}'
 var gptBackupModelFullName = toLower('${gptBackupModel}-${gptBackupVersion}')
 var gptModelFullName = toLower('${gptModel}-${gptVersion}')
 var adaModelFullName = toLower('${adaModel}-${adaVersion}')
@@ -44,12 +44,14 @@ var config = {
     public_url: storageAccount.properties.primaryEndpoints.web
   }
   workflow: {
-    agent_phone_number: agentPhoneNumber
-    bot_company: botCompany
-    bot_name: botName
-    lang: loadYamlContent('../config.yaml').workflow.lang
+    default_initiate: {
+      bot_company: botCompany
+      bot_name: botName
+      lang: loadYamlContent('../config.yaml').workflow.default_initiate.lang
+      transfer_phone_number: agentPhoneNumber
+    }
   }
-  communication_service: {
+  communication_services: {
     access_key: communication.listKeys().primaryKey
     endpoint: communication.properties.hostName
     phone_number: botPhoneNumber
@@ -160,7 +162,7 @@ resource acaEnv 'Microsoft.App/managedEnvironments@2023-05-01' = {
 }
 
 resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
-  name: 'claim-ai'
+  name: 'call-center-ai'
   location: location
   tags: tags
   identity: {
@@ -178,8 +180,8 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
     template: {
       containers: [
         {
-          image: 'ghcr.io/clemlesne/claim-ai-phone-bot:${imageVersion}'
-          name: 'claim-ai'
+          image: 'ghcr.io/clemlesne/call-center-ai:${imageVersion}'
+          name: 'call-center-ai'
           env: [
             {
               name: 'CONFIG_JSON'
@@ -471,9 +473,7 @@ resource cosmos 'Microsoft.DocumentDB/databaseAccounts@2023-11-15' = {
   kind: 'GlobalDocumentDB'
   properties: {
     consistencyPolicy: {
-      defaultConsistencyLevel: 'BoundedStaleness'  // ACID in a single-region, lag in the others
-      maxIntervalInSeconds: 600  // 5 mins lags at maximum
-      maxStalenessPrefix: 1000  // 1000 requests lags at max
+      defaultConsistencyLevel: 'Session'  // ACID is guaranteed within a session
     }
     databaseAccountOfferType: 'Standard'
     locations: [
@@ -491,10 +491,10 @@ resource cosmos 'Microsoft.DocumentDB/databaseAccounts@2023-11-15' = {
 
 resource database 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases@2023-11-15' = {
   parent: cosmos
-  name: 'claim-ai'
+  name: 'call-center-ai'
   properties: {
     resource: {
-      id: 'claim-ai'
+      id: 'call-center-ai'
     }
   }
 }
@@ -519,7 +519,7 @@ resource container 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/container
             ]
           }
           {
-            path: '/claim/policyholder_phone/?'
+            path: '/claim/caller_phone/?'
             indexes: [
               {
                 dataType: 'String'
@@ -537,7 +537,7 @@ resource container 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/container
       }
       partitionKey: {
         paths: [
-          '/phone_number'
+          '/initiate/phone_number'
         ]
         kind: 'Hash'
       }

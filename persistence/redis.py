@@ -17,7 +17,7 @@ import hashlib
 RedisInstrumentor().instrument()
 
 _logger = build_logger(__name__)
-_retry = Retry(ExponentialBackoff(), 3)
+_retry = Retry(backoff=ExponentialBackoff(), retries=3)
 
 
 class RedisCache(ICache):

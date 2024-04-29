@@ -1,62 +1,80 @@
 from datetime import datetime, UTC, tzinfo
+from helpers.config_models.workflow import DefaultInitiateModel
 from helpers.config_models.workflow import LanguageEntryModel
 from helpers.pydantic_types.phone_numbers import PhoneNumber
-from models.claim import ClaimModel
 from models.message import MessageModel
 from models.next import NextModel
 from models.reminder import ReminderModel
 from models.synthesis import SynthesisModel
 from models.training import TrainingModel
-from pydantic import BaseModel, Field, computed_field
-from typing import Optional
+from pydantic import BaseModel, Field, computed_field, field_validator, ValidationInfo
+from typing import Any, Optional
 from uuid import UUID, uuid4
 import asyncio
 import random
 import string
 
 
-class CallModel(BaseModel):
+class CallInitiateModel(DefaultInitiateModel):
+    phone_number: PhoneNumber
+
+
+class CallGetModel(BaseModel):
     # Immutable fields
     call_id: UUID = Field(default_factory=uuid4, frozen=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), frozen=True)
+    # Editable fields
+    initiate: CallInitiateModel
+    messages: list[MessageModel] = []
+    next: Optional[NextModel] = None
+    reminders: list[ReminderModel] = []
+    synthesis: Optional[SynthesisModel] = None
+    crm_entry: dict[str, Any] = {}
+
+    @computed_field
+    @property
+    def lang(self) -> LanguageEntryModel:  # type: ignore
+        if self.lang_short_code:
+            return next(
+                (
+                    lang
+                    for lang in self.initiate.lang.availables
+                    if lang.short_code == self.lang_short_code
+                ),
+                self.initiate.lang.selected,
+            )
+        return self.initiate.lang.selected
+
+    @lang.setter
+    def lang(self, short_code: str) -> None:
+        self.lang_short_code = short_code
+
+    @field_validator("crm_entry")
+    def _validate_crm_entry(
+        cls, crm_entry: dict[str, Any], info: ValidationInfo
+    ) -> dict[str, Any]:
+        initiate: CallInitiateModel = info.data["initiate"]
+        model = initiate.crm_entry_model()
+        return model.model_validate(crm_entry, strict=True).model_dump(
+            exclude_none=True
+        )
+
+    def tz(self) -> tzinfo:
+        return self.initiate.phone_number.tz()
+
+
+class CallStateModel(CallGetModel, validate_assignment=True):
+    # Immutable fields
     callback_secret: str = Field(
         default="".join(
             random.choice(string.ascii_letters + string.digits) for _ in range(16)
         ),
         frozen=True,
     )
-    # Private fields
-    lang_short_code: Optional[str] = None
     # Editable fields
-    claim: ClaimModel = Field(default_factory=ClaimModel)
-    messages: list[MessageModel] = []
-    next: Optional[NextModel] = None
-    phone_number: PhoneNumber
-    recognition_retry: int = Field(default=0)
-    reminders: list[ReminderModel] = []
-    synthesis: Optional[SynthesisModel] = None
-
-    @computed_field
-    def lang(self) -> LanguageEntryModel:  # type: ignore
-        from helpers.config import CONFIG
-
-        if self.lang_short_code:
-            return next(
-                (
-                    lang
-                    for lang in CONFIG.workflow.lang.availables
-                    if lang.short_code == self.lang_short_code
-                ),
-                CONFIG.workflow.lang.default_lang,
-            )
-        return CONFIG.workflow.lang.default_lang
-
-    @lang.setter
-    def lang(self, value: LanguageEntryModel) -> None:
-        self.lang_short_code = value.short_code
-
-    def tz(self) -> tzinfo:
-        return PhoneNumber.tz(self.phone_number)
+    lang_short_code: Optional[str] = Field(default=None)
+    voice_id: Optional[str] = None
+    voice_recognition_retry: int = Field(default=0)
 
     async def trainings(self) -> list[TrainingModel]:
         """

@@ -9,12 +9,13 @@ from typing import (
     Any,
     Callable,
     ForwardRef,
-    Set,
     Tuple,
     Type,
     TypeVar,
     Union,
 )
+from jinja2 import Environment
+from models.call import CallStateModel
 from openai.types.chat import ChatCompletionToolParam
 from openai.types.shared_params.function_definition import FunctionDefinition
 from pydantic import BaseModel, TypeAdapter
@@ -25,6 +26,10 @@ from typing_extensions import Annotated
 
 _logger = build_logger(__name__)
 T = TypeVar("T")
+_jinja = Environment(
+    autoescape=True,
+    enable_async=True,
+)
 
 
 class Parameters(BaseModel):
@@ -37,7 +42,9 @@ class Parameters(BaseModel):
     type: str = "object"
 
 
-def function_schema(f: Callable[..., Any]) -> ChatCompletionToolParam:
+async def function_schema(
+    f: Callable[..., Any], call: CallStateModel
+) -> ChatCompletionToolParam:
     """
     Get a JSON schema for a function as defined by the OpenAI API.
 
@@ -72,11 +79,19 @@ def function_schema(f: Callable[..., Any]) -> ChatCompletionToolParam:
             + f"The annotations are missing for the following parameters: {', '.join(missing_s)}"
         )
 
-    # Removing newlines from the content to avoid hallucinations issues with GPT-4 Turbo
-    description = " ".join((f.__doc__ or "").splitlines()).strip()
+    description = await _jinja.from_string(f.__doc__ or "").render_async(
+        call=call
+    )  # Render the description
+    # Remove newlines from the content to avoid hallucinations issues with GPT-4 Turbo
+    description = " ".join(description.splitlines()).strip()
     name = " ".join((f.__name__).splitlines()).strip()
-    parameters: dict[str, object] = _parameters(
-        required, param_annotations, default_values=default_values
+    parameters: dict[str, object] = (
+        await _parameters(
+            call=call,
+            default_values=default_values,
+            param_annotations=param_annotations,
+            required=required,
+        )
     ).model_dump()
 
     function = ChatCompletionToolParam(
@@ -151,10 +166,11 @@ def _param_annotations(
     }
 
 
-def _parameter_json_schema(
+async def _parameter_json_schema(
     k: str,
     v: Union[Annotated[Type[Any], str], Type[Any]],
     default_values: dict[str, Any],
+    call: CallStateModel,
 ) -> JsonSchemaValue:
     """
     Get a JSON schema for a parameter as defined by the OpenAI API.
@@ -186,7 +202,9 @@ def _parameter_json_schema(
         dv = default_values[k]
         schema["default"] = dv
 
-    schema["description"] = _description(k, v)
+    schema["description"] = await _jinja.from_string(_description(k, v)).render_async(
+        call=call
+    )  # Render the description
 
     return schema
 
@@ -225,10 +243,11 @@ def _default_values(typed_signature: inspect.Signature) -> dict[str, Any]:
     }
 
 
-def _parameters(
+async def _parameters(
     required: list[str],
     param_annotations: dict[str, Union[Annotated[Type[Any], str], Type[Any]]],
     default_values: dict[str, Any],
+    call: CallStateModel,
 ) -> Parameters:
     """
     Get the parameters of a function as defined by the OpenAI API.
@@ -242,7 +261,12 @@ def _parameters(
     """
     return Parameters(
         properties={
-            k: _parameter_json_schema(k, v, default_values)
+            k: await _parameter_json_schema(
+                call=call,
+                default_values=default_values,
+                k=k,
+                v=v,
+            )
             for k, v in param_annotations.items()
             if v != inspect.Signature.empty and k != "self"
         },
@@ -252,7 +276,7 @@ def _parameters(
 
 def _missing_annotations(
     typed_signature: inspect.Signature, required: list[str]
-) -> Tuple[Set[str], Set[str]]:
+) -> Tuple[set[str], set[str]]:
     """
     Get the missing annotations of a function.
 

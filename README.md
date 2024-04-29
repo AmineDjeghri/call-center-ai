@@ -1,12 +1,74 @@
-# Call center claim AI phone bot
+# Call Center AI
 
 AI-powered call center solution with Azure and OpenAI GPT.
 
 <!-- github.com badges -->
-[![Last release date](https://img.shields.io/github/release-date/clemlesne/claim-ai-phone-bot)](https://github.com/clemlesne/claim-ai-phone-bot/releases)
-[![Project license](https://img.shields.io/github/license/clemlesne/claim-ai-phone-bot)](https://github.com/clemlesne/claim-ai-phone-bot/blob/main/LICENSE)
+[![Last release date](https://img.shields.io/github/release-date/clemlesne/call-center-ai)](https://github.com/clemlesne/call-center-ai/releases)
+[![Project license](https://img.shields.io/github/license/clemlesne/call-center-ai)](https://github.com/clemlesne/call-center-ai/blob/main/LICENSE)
 
 ## Overview
+
+Send a phone call from AI agent, in an API call. Or, directly call the bot from the configured phone number!
+
+```bash
+# Ask the bot to call a phone number
+data='{
+  "bot_company": "Contoso Insurance",
+  "bot_name": "Alice",
+  "phone_number": "+33622222222",
+  "task": "Assistant will help the customer with their insurance claim, role is not over until all the relevant data is gathered.",
+  "transfer_phone_number": "+33611111111",
+  "crm_fields": [
+    {
+      "name": "incident_location",
+      "type": "text"
+    },
+    {
+      "name": "incident_datetime",
+      "type": "datetime"
+    },
+    {
+      "name": "whitness_number",
+      "type": "phone_number"
+    }
+  ],
+}'
+
+curl \
+  --header 'Content-Type: application/json' \
+  --request POST \
+  --url https://xxx/call \
+  --data $data
+```
+
+### Features
+
+> [!NOTE]
+> This project is a proof of concept. It is not intended to be used in production. This demonstrates how can be combined Azure Communication Services, Azure Cognitive Services and Azure OpenAI to build an automated call center solution.
+
+- [x] Access the call on a public website
+- [x] Access to customer conversation history
+- [x] Allow user to change the language of the conversation
+- [x] Bot can be called from a phone number
+- [x] Bot use multiple voice tones (e.g. happy, sad, neutral) to keep the conversation engaging
+- [x] Company products (= lexicon) can be understood by the bot (e.g. a name of a specific insurance product)
+- [x] Create by itself a todo list of tasks to complete the CRM entry
+- [x] Customizable prompts
+- [x] Disengaging from a human agent when needed
+- [x] Filter out inappropriate content from the LLM, like profanity or concurrence company names
+- [x] Fine understanding of the customer request with GPT-4 Turbo
+- [x] Follow a specific data schema for the CRM
+- [x] Has access to a documentation database (few-shot training / RAG)
+- [x] Help the user to find the information needed to complete the CMR entry
+- [x] Lower AI Search cost by usign a Redis cache
+- [x] Monitoring and tracing with Application Insights
+- [x] Responses are streamed from the LLM to the user, to avoid long pauses
+- [x] Send a SMS report after the call
+- [x] Take back a conversation after a disengagement
+- [ ] Call back the user when needed
+- [ ] Simulate a IVR workflow
+
+### Demo
 
 A French demo is avaialble on YouTube. Do not hesitate to watch the demo in x1.5 speed to get a quick overview of the project.
 
@@ -16,18 +78,18 @@ Main interactions shown in the demo:
 
 1. User calls the call center
 2. The bot answers and the conversation starts
-3. The bot stores conversation, claim and todo list in the database
+3. The bot stores conversation, CRM entry and todo list in the database
 
-Extract of the data stored during the call:
+Extract of the data stored during a call:
 
 ```json
 {
-  "claim": {
+  "crm_entry": {
     "incident_date_time": "2024-01-11T19:33:41",
     "incident_description": "The vehicle began to travel with a burning smell and the driver pulled over to the side of the freeway.",
     "policy_number": "B01371946",
-    "policyholder_phone": "[number masked for the demo]",
-    "policyholder_name": "Clémence Lesne",
+    "caller_phone": "[number masked for the demo]",
+    "caller_name": "Clémence Lesne",
     "vehicle_info": "Ford Fiesta 2003"
   },
   "reminders": [
@@ -40,36 +102,9 @@ Extract of the data stored during the call:
 }
 ```
 
-### Features
-
-> [!NOTE]
-> This project is a proof of concept. It is not intended to be used in production. This demonstrates how can be combined Azure Communication Services, Azure Cognitive Services and Azure OpenAI to build an automated call center solution.
-
-- [x] Access the claim on a public website
-- [x] Access to customer conversation history
-- [x] Allow user to change the language of the conversation
-- [x] Bot can be called from a phone number
-- [x] Bot use multiple voice tones (e.g. happy, sad, neutral) to keep the conversation engaging
-- [x] Company products (= lexicon) can be understood by the bot (e.g. a name of a specific insurance product)
-- [x] Create by itself a todo list of tasks to complete the claim
-- [x] Customizable prompts
-- [x] Disengaging from a human agent when needed
-- [x] Filter out inappropriate content from the LLM, like profanity or concurrence company names
-- [x] Fine understanding of the customer request with GPT-4 Turbo
-- [x] Follow a specific data schema for the claim
-- [x] Has access to a documentation database (few-shot training / RAG)
-- [x] Help the user to find the information needed to complete the claim
-- [x] Lower AI Search cost by usign a Redis cache
-- [x] Monitoring and tracing with Application Insights
-- [x] Responses are streamed from the LLM to the user, to avoid long pauses
-- [x] Send a SMS report after the call
-- [x] Take back a conversation after a disengagement
-- [ ] Call back the user when needed
-- [ ] Simulate a IVR workflow
-
 ### User report after the call
 
-A report is available at `https://[your_domain]/report/[phone_number]` (like `http://localhost:8080/report/%2B133658471534`). It shows the conversation history, claim data and reminders.
+A report is available at `https://[your_domain]/report/[phone_number]` (like `http://localhost:8080/report/%2B133658471534`). It shows the conversation history, CRM entry and reminders.
 
 ![User report](./docs/user_report.jpg)
 
@@ -83,7 +118,7 @@ graph
   user(["User"])
   agent(["Agent"])
 
-  api["Claim AI"]
+  api["Call Center AI"]
 
   api -- Transfer to --> agent
   api -. Send voice .-> user
@@ -94,43 +129,43 @@ graph
 
 ```mermaid
 ---
-title: Claim AI component diagram (C4 model)
+title: Call Center AI component diagram (C4 model)
 ---
 graph LR
   agent(["Agent"])
   user(["User"])
 
-  subgraph "Claim AI"
+  subgraph "Call Center AI"
     ai_search[("RAG\n(AI Search)")]
     api["API"]
-    communication_service_sms["SMS gateway\n(Communication Services)"]
-    communication_service["Call gateway\n(Communication Services)"]
+    communication_services_sms["SMS gateway\n(Communication Services)"]
+    communication_services["Call gateway\n(Communication Services)"]
     constent_safety["Moderation\n(Content Safety)"]
-    db[("Conversations and claims\n(Cosmos DB or SQLite)")]
+    db[("Conversations and CRM entries\n(Cosmos DB or SQLite)")]
     event_grid[("Broker\n(Event Grid)")]
     gpt["GPT-4 Turbo\n(OpenAI)"]
     redis[("Cache\n(Redis)")]
     translation["Translation\n(Cognitive Services)"]
   end
 
-  api -- Answer with text --> communication_service
+  api -- Answer with text --> communication_services
   api -- Ask for translation --> translation
   api -- Few-shot training --> ai_search
   api -- Generate completion --> gpt
   api -- Get cached data --> redis
   api -- Save conversation --> db
-  api -- Send SMS report --> communication_service_sms
+  api -- Send SMS report --> communication_services_sms
   api -- Test for profanity --> constent_safety
-  api -- Transfer to agent --> communication_service
+  api -- Transfer to agent --> communication_services
   api -. Watch .-> event_grid
 
-  communication_service -- Notifies --> event_grid
-  communication_service -- Transfer to --> agent
-  communication_service -. Send voice .-> user
+  communication_services -- Notifies --> event_grid
+  communication_services -- Transfer to --> agent
+  communication_services -. Send voice .-> user
 
-  communication_service_sms -- Send SMS --> user
+  communication_services_sms -- Send SMS --> user
 
-  user -- Call --> communication_service
+  user -- Call --> communication_services
 ```
 
 ### Sequence diagram
@@ -172,12 +207,12 @@ sequenceDiagram
         OpenAI GPT-->>API: Answer (HTTP/2 SSE)
         loop Over buffer
             loop Over multiple tools
-                alt Is this a claim data update?
+                alt Is this a CRM entry update?
                     API->>Content Safety: Ask for safety test
                     alt Is the text safe?
                         API->>Communication Services: Send dynamic SSML text
                     end
-                    API->>Cosmos DB: Update claim data
+                    API->>Cosmos DB: Update CRM entry
                 else Does the user want the human agent?
                     API->>Communication Services: Send static SSML text
                     API->>Communication Services: Transfer to a human
@@ -207,20 +242,20 @@ sequenceDiagram
 
 Container is available on GitHub Actions, at:
 
-- Latest version from a branch: `ghcr.io/clemlesne/claim-ai-phone-bot:main`
-- Specific tag: `ghcr.io/clemlesne/claim-ai-phone-bot:0.1.0` (recommended)
+- Latest version from a branch: `ghcr.io/clemlesne/call-center-ai:main`
+- Specific tag: `ghcr.io/clemlesne/call-center-ai:0.1.0` (recommended)
 
 Create a local `config.yaml` file (most of the fields are filled automatically by the deployment script):
 
 ```yaml
 # config.yaml
 workflow:
-  agent_phone_number: "+33612345678"
+  transfer_phone_number: "+33612345678"
   bot_company: Contoso
   bot_name: Robert
   lang: {}
 
-communication_service:
+communication_services:
   phone_number: "+33612345678"
 
 sms: {}
@@ -258,11 +293,12 @@ resources:
   public_url: "https://xxx.blob.core.windows.net/public"
 
 workflow:
-  agent_phone_number: "+33612345678"
-  bot_company: Contoso
-  bot_name: Robert
+  default_initiate:
+    bot_company: Contoso
+    bot_name: Robert
+    transfer_phone_number: "+33612345678"
 
-communication_service:
+communication_services:
   access_key: xxx
   endpoint: https://xxx.france.communication.azure.com
   phone_number: "+33612345678"
@@ -417,7 +453,7 @@ prompts:
       5. Be proactive and create reminders for follow-up or further assistance
 
       # Support status
-      {claim}
+      {crm_entry}
 
       # Reminders
       {reminders}
@@ -434,15 +470,16 @@ See the [list of supported languages](https://learn.microsoft.com/en-us/azure/ai
 [...]
 
 workflow:
-  lang:
-    default_short_code: "fr-FR"
-    availables:
-      - pronunciations_en: ["French", "FR", "France"]
-        short_code: "fr-FR"
-        voice_name: "fr-FR-DeniseNeural"
-      - pronunciations_en: ["Chinese", "ZH", "China"]
-        short_code: "zh-CN"
-        voice_name: "zh-CN-XiaoxiaoNeural"
+  default_initiate:
+    lang:
+      default_short_code: "fr-FR"
+      availables:
+        - pronunciations_en: ["French", "FR", "France"]
+          short_code: "fr-FR"
+          voice_name: "fr-FR-DeniseNeural"
+        - pronunciations_en: ["Chinese", "ZH", "China"]
+          short_code: "zh-CN"
+          voice_name: "zh-CN-XiaoxiaoNeural"
 ```
 
 ### Customize the moderation levels
@@ -462,39 +499,51 @@ content_safety:
   category_violence_score: 0
 ```
 
-### Customize the claim data schema
+### Customize the CRM entry schema
 
-Customization of the data schema is not supported yet through the configuration file. However, you can customize the data schema by modifying the application source code.
+Customization of the data schema is fully supported. You can add or remove fields as needed, depending on the requirements:
 
-The data schema is defined in `models/claim.py`. All the fields are required to be of type `Optional[str]` (except the immutable fields).
+By requesting a new call, in the API `/call`:
 
-```python
-# models/claim.py
-class ClaimModel(BaseModel):
-    # Immutable fields
-    # [...]
-    # Editable fields
-    additional_notes: Optional[str] = None
-    device_info: Optional[str] = None
-    error_messages: Optional[str] = None
-    follow_up_required: Optional[bool] = None
-    incident_date_time: Optional[datetime] = None
-    issue_description: Optional[str] = None
-    resolution_details: Optional[str] = None
-    steps_taken: Optional[str] = None
-    ticket_id: Optional[str] = None
-    user_email: Optional[EmailStr] = None
-    user_name: Optional[str] = None
-    user_phone: Optional[PhoneNumber] = None
+```json
+{
+  "bot_company": "Contoso Insurance",
+  "bot_name": "Alice",
+  "phone_number": "+33622222222",
+  "task": "Assistant will help the customer with their insurance claim, role is not over until all the relevant data is gathered.",
+  "transfer_phone_number": "+33611111111",
+  "crm_fields": [
+    {
+      "name": "incident_location",
+      "type": "text"
+    },
+    {
+      "name": "incident_datetime",
+      "type": "datetime"
+    },
+    {
+      "name": "whitness_number",
+      "type": "phone_number"
+    }
+  ]
+}
+```
 
-    # Depending on requirements, you might also include fields for:
-    # - Software version
-    # - Operating system
-    # - Network details (if relevant to the issue)
-    # - Any attachments like screenshots or log files (consider how to handle binary data)
+By configuring the default application schema:
 
-    # Built-in functions
-    [...]
+```yaml
+# config.yaml
+[...]
+
+workflow:
+  default_initiate:
+    crm_fields:
+      - name: additional_notes
+        type: text
+      - name: device_info
+        type: text
+      - name: incident_date_time
+        type: datetime
 ```
 
 ### Use an OpenAI compatible model for the LLM

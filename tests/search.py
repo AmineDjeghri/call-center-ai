@@ -1,13 +1,12 @@
 from deepeval.models.base_model import DeepEvalBaseLLM
 from helpers.config import CONFIG
 from helpers.logging import build_logger
-from models.call import CallModel
-from models.training import TrainingModel
+from models.call import CallStateModel
+from pytest import assume
 import pytest
 
 
 _logger = build_logger(__name__)
-_search = CONFIG.ai_search.instance()
 
 
 @pytest.mark.parametrize(
@@ -38,7 +37,7 @@ _search = CONFIG.ai_search.instance()
 @pytest.mark.asyncio  # Allow async functions
 @pytest.mark.repeat(10)  # Catch multi-threading and concurrency issues
 async def test_relevancy(
-    call_mock: CallModel,
+    call_mock: CallStateModel,
     deepeval_model: DeepEvalBaseLLM,
     user_lang: str,
     user_message: str,
@@ -53,11 +52,11 @@ async def test_relevancy(
 
     Test is repeated 10 times to catch multi-threading and concurrency issues.
     """
-    # Configure context
-    call_mock.lang.short_code = user_lang
+    search = CONFIG.ai_search.instance()
+    call_mock.lang = user_lang
 
     # Init data
-    data_models = await _search.training_asearch_all(user_message, call_mock)
+    data_models = await search.training_asearch_all(user_message, call_mock)
     data_str = ", ".join([d.content for d in data_models or []])
 
     _logger.info(f"User message: {user_message}")
@@ -108,7 +107,7 @@ async def test_relevancy(
     except ValueError:
         raise ValueError(f"LLM response is not a number: {llm_res}")
 
-    # Assert
-    assert (
-        llm_score >= 0.5
-    ), f"Analysis failed for {user_message}, LLM response {llm_score}"
+    assume(
+        llm_score >= 0.5,
+        f"Analysis failed for {user_message}, LLM response {llm_score}",
+    )

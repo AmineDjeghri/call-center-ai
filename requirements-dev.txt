@@ -3,6 +3,7 @@ black[jupyter]==24.3.0
 deepeval==0.20.99
 deptry==0.16.1
 pur==7.3.1
+pytest-assume==2.4.3
 pytest-asyncio==0.23.6  # Required for pytest
 pytest-repeat==0.9.3  # Required for pytest
 pytest-xdist[psutil]==3.5.0  # Required for pytest

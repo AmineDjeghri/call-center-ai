@@ -1,14 +1,13 @@
-from azure.communication.callautomation import CallConnectionClient
-from helpers.call_utils import ContextEnum as CallContextEnum, handle_play
+from fastapi import BackgroundTasks
 from helpers.config import CONFIG
 from helpers.llm_utils import function_schema
 from helpers.logging import build_logger
 from inspect import getmembers, isfunction
-from models.call import CallModel
-from models.claim import ClaimModel
+from models.call import CallStateModel
 from models.message import StyleEnum as MessageStyleEnum
 from models.reminder import ReminderModel
 from openai.types.chat import ChatCompletionToolParam
+from persistence.ivoice import ContextEnum as VoiceContextEnum
 from pydantic import ValidationError
 from typing import Awaitable, Callable, Annotated, Literal
 import asyncio
@@ -19,24 +18,25 @@ _search = CONFIG.ai_search.instance()
 
 
 class LlmPlugins:
-    call: CallModel
+    background_tasks: BackgroundTasks
+    call: CallStateModel
     cancellation_callback: Callable[[], Awaitable]
-    client: CallConnectionClient
-    post_call_intelligence: Callable[[CallModel], None]
+    post_call_intelligence: Callable[[CallStateModel], None]
     style: MessageStyleEnum = MessageStyleEnum.NONE
     user_callback: Callable[[str, MessageStyleEnum], Awaitable]
+    voice = CONFIG.voice.instance()
 
     def __init__(
         self,
-        call: CallModel,
+        background_tasks: BackgroundTasks,
+        call: CallStateModel,
         cancellation_callback: Callable[[], Awaitable],
-        client: CallConnectionClient,
-        post_call_intelligence: Callable[[CallModel], None],
+        post_call_intelligence: Callable[[CallStateModel], None],
         user_callback: Callable[[str, MessageStyleEnum], Awaitable],
     ):
+        self.background_tasks = background_tasks
         self.call = call
         self.cancellation_callback = cancellation_callback
-        self.client = client
         self.post_call_intelligence = post_call_intelligence
         self.user_callback = user_callback
 
@@ -45,32 +45,32 @@ class LlmPlugins:
         Use this if the customer said they want to end the call. Requires an explicit verbal validation from the customer. This will hang up the call. Never use this action directly after a recall. Example: 'I want to hang up', 'Goodbye, see you tomorrow'.
         """
         await self.cancellation_callback()
-        await handle_play(
+        await self.voice.aplay_text(
+            background_tasks=self.background_tasks,
             call=self.call,
-            client=self.client,
-            context=CallContextEnum.GOODBYE,
+            context=VoiceContextEnum.GOODBYE,
             text=await CONFIG.prompts.tts.goodbye(self.call),
         )
         return "Call ended"
 
-    async def new_claim(
+    async def new_conversation(
         self,
         customer_response: Annotated[
             str,
-            "Phrase used to confirm the creation of a new claim. This phrase will be spoken to the user. Describe what you're doing in one sentence. Example: 'I am creating a new claim for a car accident.', 'A new claim for a stolen watch is being created.'.",
+            "Phrase used to confirm the creation of a new conversation. This phrase will be spoken to the user. Describe what you're doing in one sentence. Example: 'I am creating a new conversation for a car accident.', 'A new conversation for a stolen watch is being created.'.",
         ],
     ) -> str:
         """
-        Use this if the customer wants to create a new claim for a totally different subject. This will reset the claim and reminder data. Old is stored but not accessible anymore. Approval from the customer must be explicitely given. Example: 'I want to create a new claim'.
+        Use this if the customer wants to create a new conversation for a totally different subject. This will reset the conversation and reminder data. Old is stored but not accessible anymore. Approval from the customer must be explicitely given. Example: 'I want to create a new conversation'.
         """
         await self.user_callback(customer_response, self.style)
         # Launch post-call intelligence for the current call
         self.post_call_intelligence(self.call)
-        # Store the last message and use it at first message of the new claim
+        # Store the last message and use it at first message of the new conversation
         last_message = self.call.messages[-1]
-        call = CallModel(phone_number=self.call.phone_number)
+        call = CallStateModel(initiate=self.call.initiate)
         call.messages.append(last_message)
-        return "Claim, reminders and messages reset"
+        return "Conversation, reminders and messages reset"
 
     async def new_or_updated_reminder(
         self,
@@ -88,7 +88,7 @@ class LlmPlugins:
         ],
         owner: Annotated[
             str,
-            "The owner of the reminder. Can be 'customer', 'assistant', or a third party from the claim. Try to be as specific as possible, with a name. Example: 'customer', 'assistant', 'contact', 'witness', 'police'.",
+            "The owner of the reminder. Can be 'customer', 'assistant', or a third party from the conversation. Try to be as specific as possible, with a name. Example: 'customer', 'assistant', 'contact', 'witness', 'police'.",
         ],
         title: Annotated[
             str,
@@ -124,37 +124,33 @@ class LlmPlugins:
         except ValidationError as e:  # Catch error
             return f'Failed to create reminder "{title}": {e.json()}'
 
-    async def updated_claim(
+    async def updated_crm(
         self,
         customer_response: Annotated[
             str,
             "Phrase used to confirm the update. This phrase will be spoken to the user. Describe what you're doing in one sentence. Example: 'I am updating the involved parties to Marie-Jeanne and Jean-Pierre and the contact contact info for your home address is now, 123 rue De La Paix.'.",
         ],
-        values: Annotated[
+        fields: Annotated[
             dict[str, str],
-            f"The claim fields to update. Available fields are {list(ClaimModel.editable_fields())}. For dates, use YYYY-MM-DD HH:MM format (e.g. 2024-02-01 18:58). For phone numbers, use E164 format (e.g. +33612345678). Example: {{'involved_parties': 'Marie-Jeanne and Jean-Pierre', 'contact_info': '123 rue De La Paix'}}",
+            "The CRM fields to update. Available fields are [{{ call.initiate.crm_entry_model().model_fields.keys() | join(', ') }}]. For dates, use YYYY-MM-DD HH:MM format (e.g. 2024-02-01 18:58). For phone numbers, use E164 format (e.g. +33612345678). Example: {'involved_parties': 'Marie-Jeanne and Jean-Pierre', 'contact_info': '123 rue De La Paix'}",
         ],
     ) -> str:
         """
-        Use this if the customer wants to update multiple claim fields with new values. It is OK to approximate dates if the customer is not precise (e.g., "last night" -> today 04h, "I'm stuck on the highway" -> now).
+        Use this if the customer wants to update multiple CRM fields with new values. It is OK to approximate dates if the customer is not precise (e.g., "last night" -> today 04h, "I'm stuck on the highway" -> now).
         """
         await self.user_callback(customer_response, self.style)
-        # Update all claim fields
+        # Update all CRM fields
         res = "# Updated fields"
-        for field, value in values.items():
-            res += f"\n- {self._update_claim_field(field, value)}"
+        for field, value in fields.items():
+            res += f"\n- {self._update_crm_field(field, value)}"
         return res
 
-    def _update_claim_field(self, field: str, value: str) -> str:
-        # Check if field is editable
-        if not field in ClaimModel.editable_fields():
-            return f'Failed to update a non-editable field "{field}".'
+    def _update_crm_field(self, field: str, value: str) -> str:
+        if not field in self.call.initiate.crm_entry_model().model_fields:
+            return f'Field "{field}" does not exist, please use a valid field.'
         try:
-            # Define the field and force to trigger validation
-            copy = self.call.claim.model_dump()
-            copy[field] = value
-            self.call.claim = ClaimModel.model_validate(copy)
-            return f'Updated claim field "{field}" with value "{value}".'
+            self.call.crm_entry[field] = value
+            return f'Updated CRM field "{field}" with value "{value}".'
         except ValidationError as e:  # Catch error to inform LLM
             return f'Failed to edit field "{field}": {e.json()}'
 
@@ -163,10 +159,10 @@ class LlmPlugins:
         Use this if the customer wants to talk to a human and Assistant is unable to help. Requires an explicit verbal validation from the customer. This will transfer the customer to an human agent. Never use this action directly after a recall. Example: 'I want to talk to a human', 'I want to talk to a real person'.
         """
         await self.cancellation_callback()
-        await handle_play(
+        await self.voice.aplay_text(
+            background_tasks=self.background_tasks,
             call=self.call,
-            client=self.client,
-            context=CallContextEnum.CONNECT_AGENT,
+            context=VoiceContextEnum.CONNECT_AGENT,
             text=await CONFIG.prompts.tts.end_call_to_connect_agent(self.call),
         )
         return "Transferring to human agent"
@@ -232,9 +228,11 @@ class LlmPlugins:
         return f"Notifying {service} for {reason}."
 
     @staticmethod
-    def to_openai() -> list[ChatCompletionToolParam]:
-        return [
-            function_schema(func[1])
-            for func in getmembers(LlmPlugins, isfunction)
-            if not func[0].startswith("_")
-        ]
+    async def to_openai(call: CallStateModel) -> list[ChatCompletionToolParam]:
+        return await asyncio.gather(
+            *[
+                function_schema(type, call)
+                for name, type in getmembers(LlmPlugins, isfunction)
+                if not name.startswith("_") and name != "to_openai"
+            ]
+        )

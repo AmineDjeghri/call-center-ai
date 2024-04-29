@@ -6,7 +6,7 @@ from azure.ai.contentsafety.models import (
     TextCategory,
 )
 from azure.core.credentials import AzureKeyCredential
-from azure.core.exceptions import HttpResponseError
+from azure.core.exceptions import HttpResponseError, ServiceRequestError
 from helpers.config import CONFIG
 from contextlib import asynccontextmanager
 from helpers.logging import build_logger, TRACER
@@ -73,6 +73,7 @@ _retried_exceptions = [
     InternalServerError,
     RateLimitError,
 ]
+
 
 class SafetyCheckError(Exception):
     message: str
@@ -159,7 +160,7 @@ async def _completion_stream_worker(
         if tools:
             extra["tools"] = tools  # Add tools if any
 
-        prompt = _limit_messages(
+        prompt = await _limit_messages(
             context=platform.context,
             max_messages=20,  # Quick response
             messages=messages,
@@ -288,7 +289,7 @@ async def _completion_sync_worker(
         if json_output:
             extra["response_format"] = {"type": "json_object"}
 
-        prompt = _limit_messages(
+        prompt = await _limit_messages(
             context=platform.context,
             messages=messages,
             model=platform.model,
@@ -345,7 +346,7 @@ async def completion_model_sync(
     return model.model_validate_json(res)
 
 
-def _limit_messages(
+async def _limit_messages(
     context: int,
     messages: list[MessageModel],
     model: str,
@@ -407,45 +408,51 @@ async def safety_check(text: str) -> None:
 
     Text can be returned both safe and censored, before containing unsafe content.
     """
-    if not text:
+    if not text:  # Empty text is safe
         return
+
     try:
         res = await _contentsafety_analysis(text)
+    except ServiceRequestError as e:
+        _logger.error(f"Request error: {e}")
+        return  # Assume safe
     except HttpResponseError as e:
-        _logger.error(f"Failed to run safety check: {e}")
+        _logger.error(f"Response error: {e}")
         return  # Assume safe
 
-    if not res:
-        _logger.error("Failed to run safety check: No result")
-        return  # Assume safe
-
+    # Replace blocklist items with censored text
     for match in res.blocklists_match or []:
         _logger.debug(f"Matched blocklist item: {match.blocklist_item_text}")
         text = text.replace(
             match.blocklist_item_text, "*" * len(match.blocklist_item_text)
         )
 
+    # Check hate category
     hate_result = _contentsafety_category_test(
         res.categories_analysis,
         TextCategory.HATE,
         CONFIG.content_safety.category_hate_score,
     )
+    # Check self harm category
     self_harm_result = _contentsafety_category_test(
         res.categories_analysis,
         TextCategory.SELF_HARM,
         CONFIG.content_safety.category_self_harm_score,
     )
+    # Check sexual category
     sexual_result = _contentsafety_category_test(
         res.categories_analysis,
         TextCategory.SEXUAL,
         CONFIG.content_safety.category_sexual_score,
     )
+    # Check violence category
     violence_result = _contentsafety_category_test(
         res.categories_analysis,
         TextCategory.VIOLENCE,
         CONFIG.content_safety.category_violence_score,
     )
 
+    # True if all categories are safe
     safety = hate_result and self_harm_result and sexual_result and violence_result
     _logger.debug(f'Text safety "{safety}" for text: {text}')
 
